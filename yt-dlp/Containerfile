@@ -1,0 +1,53 @@
+#   YT_DLP_VERSION="$(URL="$(curl --head https://github.com/yt-dlp/yt-dlp/releases/latest --output /dev/null --silent --write-out '%{redirect_url}')"; printf "%s" "${URL##*/}")"
+ARG YT_DLP_VERSION
+#   YT_DLP_FFMPEG_VERSION="$(URL="$(curl 'https://github.com/yt-dlp/FFmpeg-Builds/releases?q=-tag:latest' --silent | grep --extended-regexp 'https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/[^"]+' --max-count 1 --only-matching)"; printf "%s" "${URL##*/}")"
+ARG YT_DLP_FFMPEG_VERSION
+
+FROM debian:trixie-slim
+ARG TARGETPLATFORM
+ARG YT_DLP_VERSION
+ARG YT_DLP_FFMPEG_VERSION
+
+RUN --mount=type=tmpfs,target=/tmp \
+    --mount=type=tmpfs,target=/var/lib/apt/lists \
+    apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get --no-install-recommends --no-install-suggests -y install \
+      ca-certificates \
+      xz-utils \
+      wget \
+ && case "$TARGETPLATFORM" in \
+      "linux/amd64") \
+        YT_DLP_FFMPEG_VARIANT='linux64' \
+        YT_DLP_VARIANT='linux' \
+        ;; \
+      "linux/arm64") \
+        YT_DLP_FFMPEG_VARIANT='linuxarm64' \
+        YT_DLP_VARIANT='linux_aarch64' \
+        ;; \
+    esac \
+ && URL_PATH="$(wget "https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/$YT_DLP_FFMPEG_VERSION" --output-document - | grep --extended-regexp '/yt-dlp/FFmpeg-Builds/releases/download/[^/"]+/ffmpeg-[^-"]+-[^-"]+-[^-"]+-'"$YT_DLP_FFMPEG_VARIANT"'-gpl.tar.xz' --only-matching)" \
+ && wget --directory-prefix /tmp --progress dot:giga "https://github.com$URL_PATH" \
+ && tar --extract --file /tmp/ffmpeg-*.tar.xz --directory /opt --verbose \
+ && ln -s --verbose --target-directory /usr/bin /opt/ffmpeg-*/bin/* \
+ && wget --directory-prefix /opt --progress dot:giga \
+      "https://github.com/yt-dlp/yt-dlp/releases/download/$YT_DLP_VERSION/yt-dlp_$YT_DLP_VARIANT" \
+ && chmod +x /opt/yt-dlp_* \
+ && ln -s --verbose /opt/yt-dlp_* /usr/bin/yt-dlp \
+ && DEBIAN_FRONTEND=noninteractive apt-get --auto-remove -y purge \
+      ca-certificates \
+      xz-utils \
+      wget \
+ && apt-get clean \
+ && useradd --create-home yt-dlp \
+ && mkdir /home/yt-dlp/.cache \
+ && chown yt-dlp:yt-dlp /home/yt-dlp/.cache
+
+USER yt-dlp
+
+VOLUME /home/yt-dlp/.cache/yt-dlp
+VOLUME /home/yt-dlp/temp
+VOLUME /home/yt-dlp/home
+
+WORKDIR /home/yt-dlp/home
+
+ENTRYPOINT [ "/usr/bin/yt-dlp" ]
