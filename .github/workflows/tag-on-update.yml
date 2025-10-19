@@ -1,0 +1,28 @@
+name: Tag on update
+on:
+  schedule:
+  - cron: '*/5 * * * *'
+jobs:
+  tag-on-update:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+    - id: generate-tags
+      run: |
+        YT_DLP_URL="$(curl --head https://github.com/yt-dlp/yt-dlp/releases/latest --output /dev/null --write-out '%{redirect_url}')"
+        YT_DLP_VERSION="${YT_DLP_URL##*/}"
+        YT_DLP_FFMPEG_URL="$(curl 'https://github.com/yt-dlp/FFmpeg-Builds/releases?q=-tag:latest' | grep -E --max-count=1 --only-matching 'https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/[^"]+')"
+        YT_DLP_FFMPEG_VERSION="${YT_DLP_FFMPEG_URL##*/}"
+        printf 'TAG=%s\n' "yt-dlp-${YT_DLP_VERSION}_yt-dlp-ffmpeg-$YT_DLP_FFMPEG_VERSION" >>"$GITHUB_OUTPUT"
+    - id: tag-exists
+      run: |
+        HTTP_CODE="$(curl --head "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.generate-tags.outputs.TAG }}" --output /dev/null --write-out '%{http_code}')"
+        printf 'HTTP_CODE=%s\n' "$HTTP_CODE" >>"$GITHUB_OUTPUT"
+    - if: ${{ success() && steps.tag-exists.outputs.HTTP_CODE == 404 }}
+      run: |
+        curl -X POST ${{ github.api_url }}/repos/${{ github.repository }}/git/refs \
+          -H 'Authorization: Bearer ${{ secrets.RECURSIVE_ACTIONS }}' \
+          -H 'Accept: application/vnd.github+json' \
+          --data-raw '{"ref":"refs/tags/${{ steps.generate-tags.outputs.TAG }}","sha":"${{ github.sha }}"}' \
+          --fail
