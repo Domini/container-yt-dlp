@@ -1,0 +1,57 @@
+#   YT_DLP_VERSION="$(URL="$(curl --head https://github.com/yt-dlp/yt-dlp/releases/latest --write-out '%{redirect_url}' --output /dev/null)"; printf '%s' "${URL##*/}")"
+ARG YT_DLP_VERSION
+
+#   DENO_VERSION="$(TOKEN="$(curl 'https://dhi.io/token?scope=repository:deno:pull&service=registry.docker.io' --user "$USER_PASS" | jq --raw-output '.token')"; VERSION_FULL="$(curl https://dhi.io/v2/deno/manifests/2 -H "Authorization: Bearer $TOKEN" -H 'Accept: application/vnd.oci.image.index.v1+json' | jq --raw-output '.annotations["org.opencontainers.image.version"]')"; printf '%s' "${VERSION_FULL%%-*}")"
+ARG DENO_VERSION
+#   DENO_DIGEST="$(TOKEN="$(curl 'https://dhi.io/token?scope=repository:deno:pull&service=registry.docker.io' --user "$USER_PASS" | jq --raw-output '.token')"; curl https://dhi.io/v2/deno/manifests/2 -H "Authorization: Bearer $TOKEN" -H 'Accept: application/vnd.oci.image.index.v1+json' --write-out '%header{docker-content-digest}' --output /dev/null)"
+ARG DENO_DIGEST
+#   YT_DLP_FFMPEG_VERSION="$(URL="$(curl 'https://github.com/yt-dlp/FFmpeg-Builds/releases?q=-tag:latest' | grep -E --max-count=1 --only-matching 'https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/[^"]+')"; printf '%s' "${URL##*/}")"
+ARG YT_DLP_FFMPEG_VERSION
+#   YT_DLP_FFMPEG_FILE_VERSION="$(URL="$(curl 'https://github.com/yt-dlp/FFmpeg-Builds/releases?q=-tag:latest' | grep -E --max-count=1 --only-matching 'https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/[^"]+')"; FILE_VERSION_CHECKSUM_AMD64="$(curl "$URL" | grep --perl-regexp --max-count=1 --only-matching '(?<=ffmpeg-).+?-linux64-gpl.tar.xz".+?sha256:[0-9a-f]+')"; printf '%s' "${FILE_VERSION_CHECKSUM_AMD64%%-linux64*}")"
+ARG YT_DLP_FFMPEG_FILE_VERSION
+# amd64
+#   YT_DLP_FFMPEG_CHECKSUM="$(URL="$(curl 'https://github.com/yt-dlp/FFmpeg-Builds/releases?q=-tag:latest' | grep -E --max-count=1 --only-matching 'https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/[^"]+')"; VERSION="${URL##*/}"; FILE_VERSION_CHECKSUM_AMD64="$(curl "https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/$VERSION" | grep --perl-regexp --max-count=1 --only-matching '(?<=ffmpeg-).+?-linux64-gpl.tar.xz".+?sha256:[0-9a-f]+')"; printf '%s' "sha256:${FILE_VERSION_CHECKSUM_AMD64##*sha256:}")"
+# arm64
+#   YT_DLP_FFMPEG_CHECKSUM="$(URL="$(curl 'https://github.com/yt-dlp/FFmpeg-Builds/releases?q=-tag:latest' | grep -E --max-count=1 --only-matching 'https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/[^"]+')"; VERSION="${URL##*/}"; FILE_VERSION_CHECKSUM_ARM64="$(curl "https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/$VERSION" | grep --perl-regexp --max-count=1 --only-matching '(?<=ffmpeg-).+?-linuxarm64-gpl.tar.xz".+?sha256:[0-9a-f]+')"; printf '%s' "sha256:${FILE_VERSION_CHECKSUM_ARM64##*sha256:}")"
+ARG YT_DLP_FFMPEG_CHECKSUM
+# amd64
+#   YT_DLP_CHECKSUM="$(URL="$(curl --head https://github.com/yt-dlp/yt-dlp/releases/latest --write-out '%{redirect_url}' --output /dev/null)"; VERSION="${URL##*/}"; FILE_CHECKSUM_AMD64="$(curl "https://github.com/yt-dlp/yt-dlp/releases/expanded_assets/$VERSION" | grep -E --max-count=1 --only-matching 'yt-dlp_linux".+?sha256:[0-9a-f]+')"; printf '%s' ""sha256:${FILE_CHECKSUM_AMD64##*sha256:}"")"
+# arm64
+#   YT_DLP_CHECKSUM="$(URL="$(curl --head https://github.com/yt-dlp/yt-dlp/releases/latest --write-out '%{redirect_url}' --output /dev/null)"; VERSION="${URL##*/}"; FILE_CHECKSUM_ARM64="$(curl "https://github.com/yt-dlp/yt-dlp/releases/expanded_assets/$VERSION" | grep -E --max-count=1 --only-matching 'yt-dlp_linux_aarch64".+?sha256:[0-9a-f]+')"; printf '%s' ""sha256:${FILE_CHECKSUM_ARM64##*sha256:}"")"
+ARG YT_DLP_CHECKSUM
+
+ARG YT_DLP_FFMPEG_VARIANT="${TARGETPLATFORM/linux\/amd64/linux64}"
+ARG YT_DLP_FFMPEG_VARIANT="${YT_DLP_FFMPEG_VARIANT/linux\/arm64/linuxarm64}"
+ARG YT_DLP_VARIANT="${TARGETPLATFORM/linux\/amd64/linux}"
+ARG YT_DLP_VARIANT="${YT_DLP_VARIANT/linux\/arm64/linux_aarch64}"
+
+FROM scratch AS builder
+ARG YT_DLP_FFMPEG_VERSION
+ARG YT_DLP_FFMPEG_FILE_VERSION
+ARG YT_DLP_FFMPEG_VARIANT
+ARG YT_DLP_FFMPEG_CHECKSUM
+
+ADD --checksum=$YT_DLP_FFMPEG_CHECKSUM --unpack --chown=0:0 https://github.com/yt-dlp/FFmpeg-Builds/releases/download/$YT_DLP_FFMPEG_VERSION/ffmpeg-${YT_DLP_FFMPEG_FILE_VERSION}-${YT_DLP_FFMPEG_VARIANT}-gpl.tar.xz /opt
+
+FROM dhi.io/deno:$DENO_VERSION@$DENO_DIGEST
+ARG YT_DLP_VERSION
+ARG YT_DLP_VARIANT
+ARG YT_DLP_CHECKSUM
+
+COPY --from=builder --link --exclude=doc --exclude=man --exclude=bin/ffplay /opt/ffmpeg-*/ /opt/ffmpeg/
+ADD --checksum=$YT_DLP_CHECKSUM --chmod=0755 https://github.com/yt-dlp/yt-dlp/releases/download/$YT_DLP_VERSION/yt-dlp_$YT_DLP_VARIANT /opt/yt-dlp
+COPY --parents /usr /
+
+COPY --parents --chown=1993:1993 /home /
+
+WORKDIR /home/deno
+
+RUN [ "/usr/local/bin/deno", "run", "-A", "--reload", "jsr:@deno/installer-shell-setup/bundled", "/home/deno/.deno" ]
+
+VOLUME /home/deno/.cache/yt-dlp
+VOLUME /home/yt-dlp/temp
+VOLUME /home/yt-dlp/home
+
+WORKDIR /home/yt-dlp/home
+
+ENTRYPOINT [ "/usr/local/bin/yt-dlp" ]
