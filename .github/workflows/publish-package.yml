@@ -2,7 +2,7 @@ name: Publish package
 on:
   push:
     tags:
-    - yt-dlp-*_yt-dlp-ffmpeg-*
+    - yt-dlp-*_deno-*_yt-dlp-ffmpeg-*
 env:
   REGISTRY: ghcr.io
   PACKAGE_NAME: yt-dlp
@@ -24,8 +24,10 @@ jobs:
       run: |
         REST="${GITHUB_REF_NAME#yt-dlp-}"
         YT_DLP_VERSION="${REST%%_*}"
+        REST="${REST#*_deno-}"
+        DENO_VERSION="${REST%%_*}"
         YT_DLP_FFMPEG_VERSION="${REST#*_yt-dlp-ffmpeg-}"
-        printf 'BUILD_ARGS<<EOF\nYT_DLP_VERSION=%s\nYT_DLP_FFMPEG_VERSION=%s\nEOF\n' "$YT_DLP_VERSION" "$YT_DLP_FFMPEG_VERSION" >>"$GITHUB_OUTPUT"
+        printf 'BUILD_ARGS<<EOF\nYT_DLP_VERSION=%s\nDENO_VERSION=%s\nYT_DLP_FFMPEG_VERSION=%s\nEOF\n' "$YT_DLP_VERSION" "$DENO_VERSION" "$YT_DLP_FFMPEG_VERSION" >>"$GITHUB_OUTPUT"
     - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
     - uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
       with:

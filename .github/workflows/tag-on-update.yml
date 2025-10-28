@@ -12,9 +12,16 @@ jobs:
       run: |
         YT_DLP_URL="$(curl --head https://github.com/yt-dlp/yt-dlp/releases/latest --output /dev/null --write-out '%{redirect_url}')"
         YT_DLP_VERSION="${YT_DLP_URL##*/}"
+        curl https://dl.deno.land/release-latest.txt \
+          --output-dir ${{ runner.temp }} \
+          --remote-name \
+          --remote-time \
+          --fail
+        DENO_RELEASE="$(<${{ runner.temp }}/release-latest.txt)"
+        DENO_VERSION="${DENO_RELEASE#v}"
         YT_DLP_FFMPEG_URL="$(curl 'https://github.com/yt-dlp/FFmpeg-Builds/releases?q=-tag:latest' | grep -E --max-count=1 --only-matching 'https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/[^"]+')"
         YT_DLP_FFMPEG_VERSION="${YT_DLP_FFMPEG_URL##*/}"
-        printf 'TAG=%s\n' "yt-dlp-${YT_DLP_VERSION}_yt-dlp-ffmpeg-$YT_DLP_FFMPEG_VERSION" >>"$GITHUB_OUTPUT"
+        printf 'TAG=%s\n' "yt-dlp-${YT_DLP_VERSION}_deno-${DENO_VERSION}_yt-dlp-ffmpeg-$YT_DLP_FFMPEG_VERSION" >>"$GITHUB_OUTPUT"
     - id: tag-exists
       run: |
         HTTP_CODE="$(curl --head "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.generate-tags.outputs.TAG }}" --output /dev/null --write-out '%{http_code}')"
