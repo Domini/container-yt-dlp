@@ -1,13 +1,17 @@
 #   YT_DLP_VERSION="$(URL="$(curl --head https://github.com/yt-dlp/yt-dlp/releases/latest --output /dev/null --silent --write-out '%{redirect_url}')"; printf '%s' "${URL##*/}")"
 ARG YT_DLP_VERSION
+#   DENO_VERSION="$(RELEASE="$(curl https://dl.deno.land/release-latest.txt --silent)"; printf '%s' "${RELEASE#v}")"
+ARG DENO_VERSION
 #   YT_DLP_FFMPEG_VERSION="$(URL="$(curl 'https://github.com/yt-dlp/FFmpeg-Builds/releases?q=-tag:latest' --silent | grep --extended-regexp 'https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/[^"]+' --max-count 1 --only-matching)"; printf '%s' "${URL##*/}")"
 ARG YT_DLP_FFMPEG_VERSION
 
 FROM debian:trixie-slim
 ARG TARGETPLATFORM
 ARG YT_DLP_VERSION
+ARG DENO_VERSION
 ARG YT_DLP_FFMPEG_VERSION
 
+# https://deno.land/install.sh
 RUN --mount=type=tmpfs,target=/tmp \
     --mount=type=tmpfs,target=/var/lib/apt/lists \
     apt-get update \
@@ -17,14 +21,21 @@ RUN --mount=type=tmpfs,target=/tmp \
       wget \
  && case "$TARGETPLATFORM" in \
       "linux/amd64") \
+        DENO_VARIANT='x86_64' \
         YT_DLP_FFMPEG_VARIANT='linux64' \
         YT_DLP_VARIANT='linux' \
         ;; \
       "linux/arm64") \
+        DENO_VARIANT='aarch64' \
         YT_DLP_FFMPEG_VARIANT='linuxarm64' \
         YT_DLP_VARIANT='linux_aarch64' \
         ;; \
     esac \
+ && wget --directory-prefix /tmp --progress dot:giga "https://dl.deno.land/release/v$DENO_VERSION/deno-$DENO_VARIANT-unknown-linux-gnu.zip" \
+ && uncompress --keep --name --suffix .zip --verbose /tmp/deno-*.zip \
+ && cp -a --verbose "/tmp/deno-$DENO_VARIANT-unknown-linux-gnu" /opt \
+ && chmod +x /opt/deno-* \
+ && ln -s --verbose /opt/deno-* /usr/bin/deno \
  && URL_PATH="$(wget "https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/$YT_DLP_FFMPEG_VERSION" --output-document - | grep --extended-regexp '/yt-dlp/FFmpeg-Builds/releases/download/[^/"]+/ffmpeg-[^-"]+-[^-"]+-[^-"]+-'"$YT_DLP_FFMPEG_VARIANT"'-gpl.tar.xz' --only-matching)" \
  && wget --directory-prefix /tmp --progress dot:giga "https://github.com$URL_PATH" \
  && tar --extract --file /tmp/ffmpeg-*.tar.xz --directory /opt --verbose \
@@ -38,11 +49,13 @@ RUN --mount=type=tmpfs,target=/tmp \
       xz-utils \
       wget \
  && apt-get clean \
- && useradd --create-home yt-dlp \
- && mkdir /home/yt-dlp/.cache \
- && chown yt-dlp:yt-dlp /home/yt-dlp/.cache
+ && useradd --create-home yt-dlp
 
 USER yt-dlp
+WORKDIR /home/yt-dlp
+
+RUN mkdir /home/yt-dlp/.cache \
+ && deno run -A --reload jsr:@deno/installer-shell-setup/bundled /home/yt-dlp/.deno
 
 VOLUME /home/yt-dlp/.cache/yt-dlp
 VOLUME /home/yt-dlp/temp
