@@ -1,0 +1,98 @@
+name: Tag on update
+on:
+  schedule:
+  - cron: '*/5 * * * *'
+jobs:
+  tag-on-update:
+    runs-on: ubuntu-slim
+    permissions:
+      contents: write
+    steps:
+    - id: generate-tags
+      run: |
+        YT_DLP_URL="$(curl --head https://github.com/yt-dlp/yt-dlp/releases/latest --write-out '%{redirect_url}' --output /dev/null --fail)"
+        YT_DLP_VERSION="${YT_DLP_URL##*/}"
+
+        curl 'https://dhi.io/token?scope=repository:deno:pull&service=registry.docker.io' \
+          --user "${{ secrets.DOCKER_HUB_USER }}:${{ secrets.DOCKER_HUB_PASS }}" \
+          --output-dir ${{ runner.temp }} \
+          --output deno_repo_token.response \
+          --remote-time \
+          --fail
+        DENO_TOKEN="$(jq --raw-output --exit-status '.token' <${{ runner.temp }}/deno_repo_token.response)"
+        DENO_DIGEST="$(curl https://dhi.io/v2/deno/manifests/2 \
+          -H "Authorization: Bearer $DENO_TOKEN" \
+          -H 'Accept: application/vnd.oci.image.index.v1+json' \
+          --write-out '%header{docker-content-digest}' \
+          --output-dir ${{ runner.temp }} \
+          --output deno.manifest \
+          --remote-time \
+          --fail)"
+        DENO_VERSION_FULL="$(jq --raw-output --exit-status '.annotations["org.opencontainers.image.version"]' <${{ runner.temp }}/deno.manifest)"
+        DENO_VERSION="${DENO_VERSION_FULL%%-*}"
+
+        curl 'https://github.com/yt-dlp/FFmpeg-Builds/releases?q=-tag:latest' \
+          --output-dir ${{ runner.temp }} \
+          --output yt-dlp_ffmpeg.releases \
+          --remote-time \
+          --fail
+        YT_DLP_FFMPEG_URL="$(grep -E --max-count=1 --only-matching 'https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/[^"]+' ${{ runner.temp }}/yt-dlp_ffmpeg.releases)"
+        YT_DLP_FFMPEG_VERSION="${YT_DLP_FFMPEG_URL##*/}"
+
+        curl "https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/$YT_DLP_FFMPEG_VERSION" \
+          --output-dir ${{ runner.temp }} \
+          --output yt-dlp_ffmpeg.expanded_assets \
+          --remote-time \
+          --fail
+        YT_DLP_FFMPEG_FILE_VERSION_CHECKSUM_AMD64="$(grep --perl-regexp --max-count=1 --only-matching '(?<=ffmpeg-).+?-linux64-gpl.tar.xz".+?sha256:[0-9a-f]+' ${{ runner.temp }}/yt-dlp_ffmpeg.expanded_assets)"
+        YT_DLP_FFMPEG_FILE_VERSION_CHECKSUM_ARM64="$(grep --perl-regexp --max-count=1 --only-matching '(?<=ffmpeg-).+?-linuxarm64-gpl.tar.xz".+?sha256:[0-9a-f]+' ${{ runner.temp }}/yt-dlp_ffmpeg.expanded_assets)"
+        YT_DLP_FFMPEG_FILE_VERSION="${YT_DLP_FFMPEG_FILE_VERSION_CHECKSUM_AMD64%%-linux64*}"
+        YT_DLP_FFMPEG_CHECKSUM_AMD64="sha256:${YT_DLP_FFMPEG_FILE_VERSION_CHECKSUM_AMD64##*sha256:}"
+        YT_DLP_FFMPEG_CHECKSUM_ARM64="sha256:${YT_DLP_FFMPEG_FILE_VERSION_CHECKSUM_ARM64##*sha256:}"
+
+        curl "https://github.com/yt-dlp/yt-dlp/releases/expanded_assets/$YT_DLP_VERSION" \
+          --output-dir ${{ runner.temp }} \
+          --output yt-dlp.expanded_assets \
+          --remote-time \
+          --fail
+        YT_DLP_FILE_CHECKSUM_AMD64="$(grep -E --max-count=1 --only-matching 'yt-dlp_linux".+?sha256:[0-9a-f]+' ${{ runner.temp }}/yt-dlp.expanded_assets)"
+        YT_DLP_FILE_CHECKSUM_ARM64="$(grep -E --max-count=1 --only-matching 'yt-dlp_linux_aarch64".+?sha256:[0-9a-f]+' ${{ runner.temp }}/yt-dlp.expanded_assets)"
+        YT_DLP_CHECKSUM_AMD64="sha256:${YT_DLP_FILE_CHECKSUM_AMD64##*sha256:}"
+        YT_DLP_CHECKSUM_ARM64="sha256:${YT_DLP_FILE_CHECKSUM_ARM64##*sha256:}"
+
+        printf 'TAG=%s
+        MESSAGE<<EOF
+        DENO_VERSION=%s\\nDENO_DIGEST=%s\\nYT_DLP_FFMPEG_VERSION=%s\\nYT_DLP_FFMPEG_FILE_VERSION=%s\\nYT_DLP_FFMPEG_CHECKSUM_AMD64=%s\\nYT_DLP_FFMPEG_CHECKSUM_ARM64=%s\\nYT_DLP_CHECKSUM_AMD64=%s\\nYT_DLP_CHECKSUM_ARM64=%s\\n\\n
+        EOF
+        ' \
+          "$YT_DLP_VERSION" \
+          "$DENO_VERSION" \
+          "$DENO_DIGEST" \
+          "$YT_DLP_FFMPEG_VERSION" \
+          "$YT_DLP_FFMPEG_FILE_VERSION" \
+          "$YT_DLP_FFMPEG_CHECKSUM_AMD64" \
+          "$YT_DLP_FFMPEG_CHECKSUM_ARM64" \
+          "$YT_DLP_CHECKSUM_AMD64" \
+          "$YT_DLP_CHECKSUM_ARM64" \
+          >>"$GITHUB_OUTPUT"
+    - id: tag-exists
+      run: |
+        HTTP_CODE="$(curl --head "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.generate-tags.outputs.TAG }}" --write-out '%{http_code}' --output /dev/null)"
+        printf 'HTTP_CODE=%s\n' "$HTTP_CODE" >>"$GITHUB_OUTPUT"
+    - if: ${{ success() && steps.tag-exists.outputs.HTTP_CODE == 404 }}
+      run: |
+        curl -X POST ${{ github.api_url }}/repos/${{ github.repository }}/git/tags \
+          -H 'Authorization: Bearer ${{ secrets.RECURSIVE_ACTIONS }}' \
+          -H 'Accept: application/vnd.github+json' \
+          --data-raw '{"tag":"${{ steps.generate-tags.outputs.TAG }}","message":"${{ steps.generate-tags.outputs.MESSAGE }}","object":"${{ github.sha }}","type":"commit"}' \
+          --output-dir ${{ runner.temp }} \
+          --output tag_create.response \
+          --remote-time \
+          --fail
+        SHA="$(jq --raw-output --exit-status '.sha' <${{ runner.temp }}/tag_create.response)"
+
+        curl -X POST ${{ github.api_url }}/repos/${{ github.repository }}/git/refs \
+          -H 'Authorization: Bearer ${{ secrets.RECURSIVE_ACTIONS }}' \
+          -H 'Accept: application/vnd.github+json' \
+          --data-raw '{"ref":"refs/tags/${{ steps.generate-tags.outputs.TAG }}","sha":"'"$SHA"'"}' \
+          --fail
