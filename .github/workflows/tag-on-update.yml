@@ -1,0 +1,49 @@
+name: Tag on update
+on:
+  schedule:
+  - cron: '*/5 * * * *'
+jobs:
+  tag-on-update:
+    runs-on: ubuntu-slim
+    permissions:
+      contents: write
+    steps:
+    - id: generate-tags
+      run: |
+        YT_DLP_URL="$(curl --head https://github.com/yt-dlp/yt-dlp/releases/latest --output /dev/null --write-out '%{redirect_url}' --fail)"
+        YT_DLP_VERSION="${YT_DLP_URL##*/}"
+        curl 'https://dhi.io/token?scope=repository:deno:pull&service=registry.docker.io' \
+          --user "${{ secrets.DOCKER_HUB_USER }}:${{ secrets.DOCKER_HUB_PASS }}" \
+          --output-dir ${{ runner.temp }} \
+          --output deno_repo_token.response \
+          --remote-time \
+          --fail
+        DENO_TOKEN="$(jq --raw-output '.token' <${{ runner.temp }}/deno_repo_token.response)"
+        curl https://dhi.io/v2/deno/manifests/2 \
+          -H "Authorization: Bearer $DENO_TOKEN" \
+          -H 'Accept: application/vnd.oci.image.index.v1+json' \
+          --output-dir ${{ runner.temp }} \
+          --output deno.manifest \
+          --remote-time \
+          --fail
+        DENO_VERSION_FULL="$(jq --raw-output '.annotations["org.opencontainers.image.version"]' <${{ runner.temp }}/deno.manifest)"
+        DENO_VERSION="${DENO_VERSION_FULL%%-*}"
+        curl 'https://github.com/yt-dlp/FFmpeg-Builds/releases?q=-tag:latest' \
+          --output-dir ${{ runner.temp }} \
+          --output yt-dlp_ffmpeg.releases \
+          --remote-time \
+          --fail
+        YT_DLP_FFMPEG_URL="$(grep -E --max-count=1 --only-matching 'https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/[^"]+' ${{ runner.temp }}/yt-dlp_ffmpeg.releases)"
+        YT_DLP_FFMPEG_VERSION="${YT_DLP_FFMPEG_URL##*/}"
+        printf 'TAG=%s\n' "yt-dlp-${YT_DLP_VERSION}_deno-${DENO_VERSION}_yt-dlp-ffmpeg-$YT_DLP_FFMPEG_VERSION" >>"$GITHUB_OUTPUT"
+    - id: tag-exists
+      run: |
+        HTTP_CODE="$(curl --head "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.generate-tags.outputs.TAG }}" --output /dev/null --write-out '%{http_code}')"
+        printf 'HTTP_CODE=%s\n' "$HTTP_CODE" >>"$GITHUB_OUTPUT"
+    - if: ${{ success() && steps.tag-exists.outputs.HTTP_CODE == 404 }}
+      run: |
+        curl -X POST ${{ github.api_url }}/repos/${{ github.repository }}/git/refs \
+          -H 'Authorization: Bearer ${{ secrets.RECURSIVE_ACTIONS }}' \
+          -H 'Accept: application/vnd.github+json' \
+          --data-raw '{"ref":"refs/tags/${{ steps.generate-tags.outputs.TAG }}","sha":"${{ github.sha }}"}' \
+          --fail
