@@ -1,0 +1,11 @@
+[Container]
+ContainerName=yt-dlp-%i
+Image=ghcr.io/domini/yt-dlp:latest
+Mount=type=tmpfs,target=/home/deno/.cache/yt-dlp,chown,tmpfs-mode=0755
+Mount=type=tmpfs,target=/home/yt-dlp/temp,chown,tmpfs-mode=0755
+Mount=type=tmpfs,target=/home/yt-dlp/home,chown,tmpfs-mode=0755
+Pull=newer
+ReadOnly=true
+
+[Service]
+Restart=always
