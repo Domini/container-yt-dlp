@@ -1,0 +1,13 @@
+[Container]
+AutoUpdate=registry
+ContainerName=yt-dlp-%i
+Entrypoint=/usr/local/bin/deno
+Exec=eval 'Deno.addSignalListener("SIGTERM", () => { Deno.exit(); }); while (true) await new Promise(r => setTimeout(r, 2147483647));'
+Image=ghcr.io/domini/yt-dlp:latest
+Mount=type=tmpfs,target=/home/deno/.cache/yt-dlp,chown,tmpfs-mode=0755
+Mount=type=tmpfs,target=/home/yt-dlp/temp,chown,tmpfs-mode=0755
+Pull=newer
+ReadOnly=true
+
+[Service]
+Restart=always
