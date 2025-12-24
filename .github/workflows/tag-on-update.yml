@@ -12,22 +12,13 @@ jobs:
       run: |
         YT_DLP_URL="$(curl --head https://github.com/yt-dlp/yt-dlp/releases/latest --output /dev/null --write-out '%{redirect_url}' --fail)"
         YT_DLP_VERSION="${YT_DLP_URL##*/}"
-        curl 'https://dhi.io/token?scope=repository:deno:pull&service=registry.docker.io' \
-          --user "${{ secrets.DOCKER_HUB_USER }}:${{ secrets.DOCKER_HUB_PASS }}" \
+        curl https://dl.deno.land/release-latest.txt \
           --output-dir ${{ runner.temp }} \
-          --output deno_repo_token.response \
+          --output deno_release-latest.txt \
           --remote-time \
           --fail
-        DENO_TOKEN="$(jq --raw-output '.token' <${{ runner.temp }}/deno_repo_token.response)"
-        curl https://dhi.io/v2/deno/manifests/2 \
-          -H "Authorization: Bearer $DENO_TOKEN" \
-          -H 'Accept: application/vnd.oci.image.index.v1+json' \
-          --output-dir ${{ runner.temp }} \
-          --output deno.manifest \
-          --remote-time \
-          --fail
-        DENO_VERSION_FULL="$(jq --raw-output '.annotations["org.opencontainers.image.version"]' <${{ runner.temp }}/deno.manifest)"
-        DENO_VERSION="${DENO_VERSION_FULL%%-*}"
+        DENO_RELEASE="$(<${{ runner.temp }}/deno_release-latest.txt)"
+        DENO_VERSION="${DENO_RELEASE#v}"
         curl 'https://github.com/yt-dlp/FFmpeg-Builds/releases?q=-tag:latest' \
           --output-dir ${{ runner.temp }} \
           --output yt-dlp_ffmpeg.releases \
