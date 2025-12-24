@@ -1,31 +1,41 @@
 #   YT_DLP_VERSION="$(URL="$(curl --head https://github.com/yt-dlp/yt-dlp/releases/latest --output /dev/null --silent --write-out '%{redirect_url}')"; printf '%s' "${URL##*/}")"
 ARG YT_DLP_VERSION
-#   DENO_VERSION="$(TOKEN="$(curl 'https://dhi.io/token?scope=repository:deno:pull&service=registry.docker.io' --user "$USER_PASS" | jq --raw-output '.token')"; VERSION_FULL="$(curl https://dhi.io/v2/deno/manifests/1 -H "Authorization: Bearer $TOKEN" -H 'Accept: application/vnd.oci.image.index.v1+json' | jq --raw-output '.annotations["org.opencontainers.image.version"]')"; printf '%s' "${VERSION_FULL%%-*}")"
+#   DENO_VERSION="$(RELEASE="$(curl https://dl.deno.land/release-latest.txt --silent)"; printf '%s' "${RELEASE#v}")"
 ARG DENO_VERSION
 #   YT_DLP_FFMPEG_VERSION="$(URL="$(curl 'https://github.com/yt-dlp/FFmpeg-Builds/releases?q=-tag:latest' --silent | grep -E --max-count=1 --only-matching 'https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/[^"]+')"; printf '%s' "${URL##*/}")"
 ARG YT_DLP_FFMPEG_VERSION
 
-FROM dhi.io/debian-base:trixie AS builder
+FROM debian:trixie-slim
 ARG TARGETPLATFORM
 ARG YT_DLP_VERSION
+ARG DENO_VERSION
 ARG YT_DLP_FFMPEG_VERSION
 
+# https://deno.land/install.sh
 RUN --mount=type=tmpfs,target=/tmp \
     --mount=type=tmpfs,target=/var/lib/apt/lists \
     apt-get update \
- && apt-get --no-install-recommends --no-install-suggests -y install \
+ && DEBIAN_FRONTEND=noninteractive apt-get --no-install-recommends --no-install-suggests -y install \
+      ca-certificates \
       wget \
       xz-utils \
  && case "$TARGETPLATFORM" in \
       "linux/amd64") \
+        DENO_VARIANT='x86_64' \
         YT_DLP_FFMPEG_VARIANT='linux64' \
         YT_DLP_VARIANT='linux' \
         ;; \
       "linux/arm64") \
+        DENO_VARIANT='aarch64' \
         YT_DLP_FFMPEG_VARIANT='linuxarm64' \
         YT_DLP_VARIANT='linux_aarch64' \
         ;; \
     esac \
+ && wget --directory-prefix /tmp --progress dot:giga "https://dl.deno.land/release/v$DENO_VERSION/deno-$DENO_VARIANT-unknown-linux-gnu.zip" \
+ && uncompress --keep --name --suffix .zip --verbose /tmp/deno-*.zip \
+ && cp -a --verbose "/tmp/deno-$DENO_VARIANT-unknown-linux-gnu" /opt \
+ && chmod --verbose +x /opt/deno-* \
+ && ln -s --verbose /opt/deno-* /usr/local/bin/deno \
  && URL_PATH="$(wget "https://github.com/yt-dlp/FFmpeg-Builds/releases/expanded_assets/$YT_DLP_FFMPEG_VERSION" --output-document - | grep -E --only-matching '/yt-dlp/FFmpeg-Builds/releases/download/[^/"]+/ffmpeg-[^-"]+-[^-"]+-[^-"]+-'"$YT_DLP_FFMPEG_VARIANT"'-gpl.tar.xz')" \
  && wget --directory-prefix /tmp --progress dot:giga "https://github.com$URL_PATH" \
  && tar --extract --file /tmp/ffmpeg-*.tar.xz --no-same-owner --exclude 'ffmpeg-*/bin/ffplay' --exclude 'ffmpeg-*/doc' --exclude 'ffmpeg-*/man' --directory /opt --verbose \
@@ -34,17 +44,15 @@ RUN --mount=type=tmpfs,target=/tmp \
  && chmod --verbose +x /opt/yt-dlp_* \
  && ln -s --verbose /opt/yt-dlp_* /usr/local/bin/yt-dlp \
  && DEBIAN_FRONTEND=noninteractive apt-get --auto-remove -y purge \
+      ca-certificates \
       wget \
       xz-utils \
  && apt-get clean \
+ && useradd --create-home --uid 1993 deno \
  && mkdir -p --verbose /home/deno/.cache /home/yt-dlp \
  && chown -R --verbose 1993:1993 /home/deno/.cache /home/yt-dlp
 
-
-FROM dhi.io/deno:$DENO_VERSION
-
-COPY --from=builder --parents /opt/ffmpeg-* /opt/yt-dlp_* /usr/local/bin/ffmpeg /usr/local/bin/yt-dlp /home/deno/.cache /home/yt-dlp /
-
+USER deno
 WORKDIR /home/deno
 
 RUN [ "/usr/local/bin/deno", "run", "-A", "--reload", "jsr:@deno/installer-shell-setup/bundled", "/home/deno/.deno" ]
